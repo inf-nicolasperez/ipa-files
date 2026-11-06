@@ -451,7 +451,15 @@ def cmd_add(args) -> None:
         )
         log(f"uploaded -> {url}")
 
-    icon_url = store_icon(meta, raw, Path(args.icon).resolve() if args.icon else None)
+    if args.dry_run:
+        icon_name = f"{slugify(meta['bundleIdentifier'])}.png"
+        icon_url = (
+            f"{raw}/icons/{icon_name}"
+            if (meta.get("iconBytes") or args.icon)
+            else (sidecar.get("iconURL") or meta.get("itunesIcon") or "")
+        )
+    else:
+        icon_url = store_icon(meta, raw, Path(args.icon).resolve() if args.icon else None)
     entry = version_entry(meta, url, sidecar.get("localizedDescription", ""))
     data = load_source(cfg)
     app = upsert_app(data, meta, entry, icon_url, sidecar)

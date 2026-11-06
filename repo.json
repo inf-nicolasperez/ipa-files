@@ -3,9 +3,9 @@
   "identifier": "com.family.apps",
   "subtitle": "Apps for the family",
   "description": "Our private app source. Add it in Feather with the link at the bottom of the README.",
-  "iconURL": "https://raw.githubusercontent.com/inf-nicolasperez/family-apps/main/icons/repo.png",
+  "iconURL": "https://raw.githubusercontent.com/inf-nicolasperez/ipa-files/main/icons/repo.png",
   "headerURL": "",
-  "website": "https://github.com/inf-nicolasperez/family-apps",
+  "website": "https://github.com/inf-nicolasperez/ipa-files",
   "tintColor": "0A84FF",
   "featuredApps": [],
   "apps": [

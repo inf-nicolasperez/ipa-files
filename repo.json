@@ -8,6 +8,36 @@
   "website": "https://github.com/inf-nicolasperez/family-apps",
   "tintColor": "0A84FF",
   "featuredApps": [],
-  "apps": [],
+  "apps": [
+    {
+      "name": "Feather",
+      "bundleIdentifier": "thewonderofyou.Feather",
+      "developerName": "Feather",
+      "subtitle": "",
+      "localizedDescription": "",
+      "iconURL": "https://raw.githubusercontent.com/inf-nicolasperez/family-apps/main/icons/thewonderofyou.feather.png",
+      "tintColor": "",
+      "category": "",
+      "screenshotURLs": [],
+      "appPermissions": {
+        "entitlements": [],
+        "privacy": {}
+      },
+      "versions": [
+        {
+          "version": "2.9.0",
+          "date": "2026-11-06T04:37:34Z",
+          "downloadURL": "https://github.com/inf-nicolasperez/family-apps/releases/download/feather-2.9.0/Feather.ipa",
+          "size": 14241853,
+          "buildVersion": "1",
+          "minOSVersion": "16.0"
+        }
+      ],
+      "version": "2.9.0",
+      "versionDate": "2026-11-06T04:37:34Z",
+      "size": 14241853,
+      "downloadURL": "https://github.com/inf-nicolasperez/family-apps/releases/download/feather-2.9.0/Feather.ipa"
+    }
+  ],
   "news": []
 }

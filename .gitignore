@@ -1,10 +1,6 @@
-# IPAs are too big for git (GitHub rejects anything over 100 MB).
-# They are uploaded to GitHub *Releases* instead, and only repo.json is committed.
+# IPAs live in Releases (git rejects files over 100 MB).
 *.ipa
-apps/*
-!apps/.gitkeep
-
+.tmp_ipa/
 __pycache__/
-*.pyc
 .DS_Store
 Thumbs.db

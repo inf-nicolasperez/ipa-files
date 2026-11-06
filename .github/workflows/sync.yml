@@ -1,0 +1,192 @@
+name: Update source
+
+# Drop an .ipa onto the Releases page -> this reads it and rebuilds repo.json.
+# Releases is used because git refuses files over 100 MB (your IPAs are bigger).
+on:
+  release:
+    types: [published]
+  workflow_dispatch:        # "Run workflow" rebuilds repo.json from every release
+
+permissions:
+  contents: write
+
+concurrency:
+  group: update-source
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Rebuild repo.json from releases
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MODE: ${{ github.event_name == 'release' && 'release' || 'rebuild' }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          python3 - <<'PY'
+          import json, os, plistlib, re, shutil, subprocess, zipfile
+          from datetime import datetime, timezone
+          from pathlib import Path
+
+          MODE = os.environ.get("MODE", "rebuild")
+          TAG = (os.environ.get("TAG") or "").strip()
+          REPO = os.environ["GITHUB_REPOSITORY"]
+          RAW = f"https://raw.githubusercontent.com/{REPO}/main"
+          SRC = Path("repo.json")
+          ICONS = Path("icons"); ICONS.mkdir(exist_ok=True)
+          TMP = Path(".tmp_ipa")
+
+          def slug(s):
+              return re.sub(r"[^a-z0-9._-]+", "-", s.lower()).strip("-") or "app"
+
+          def gh(*a):
+              p = subprocess.run(["gh", *a], capture_output=True, text=True)
+              if p.returncode:
+                  print(p.stderr.strip())
+              return p.stdout.strip()
+
+          def tags():
+              if MODE == "release" and TAG:
+                  return [TAG]
+              out = gh("release", "list", "--limit", "200", "--json", "tagName,isDraft",
+                       "--jq", ".[]|select(.isDraft|not)|.tagName")
+              return [t.strip() for t in out.splitlines() if t.strip()]
+
+          def published(tag):
+              return gh("release", "view", tag, "--json", "publishedAt",
+                        "--jq", ".publishedAt") or datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+          def parse(path):
+              with zipfile.ZipFile(path) as z:
+                  names = z.namelist()
+                  cand = sorted({p[1] for p in (n.split("/") for n in names)
+                                 if len(p) > 2 and p[0] == "Payload" and p[1].endswith(".app")
+                                 and f"Payload/{p[1]}/Info.plist" in names})
+                  if not cand:
+                      print(f"  ! {path.name}: no Payload/*.app/Info.plist - skipped")
+                      return None
+                  app = cand[0]
+                  info = plistlib.loads(z.read(f"Payload/{app}/Info.plist"))
+                  depth = f"Payload/{app}/".count("/")
+                  best = None
+                  for n in names:
+                      if not n.startswith(f"Payload/{app}/") or not n.lower().endswith(".png"):
+                          continue
+                      if n.count("/") != depth:
+                          continue
+                      base = n.rsplit("/", 1)[-1].lower()
+                      if base.startswith("appicon") or "icon" in base:
+                          if best is None or z.getinfo(n).file_size > z.getinfo(best).file_size:
+                              best = n
+                  icon = z.read(best) if best else None
+                  enc = any(n.startswith(f"Payload/{app}/SC_Info/") for n in names)
+              return {
+                  "name": (info.get("CFBundleDisplayName") or info.get("CFBundleName") or app[:-4]).strip(),
+                  "bundleIdentifier": str(info.get("CFBundleIdentifier") or "").strip(),
+                  "version": str(info.get("CFBundleShortVersionString") or "1.0"),
+                  "buildVersion": str(info.get("CFBundleVersion") or ""),
+                  "minOSVersion": str(info.get("MinimumOSVersion") or ""),
+                  "size": Path(path).stat().st_size,
+                  "icon": icon,
+                  "encrypted": enc,
+              }
+
+          def upsert(src, meta, date, url):
+              apps = src.setdefault("apps", [])
+              app = next((a for a in apps if a.get("bundleIdentifier") == meta["bundleIdentifier"]), None)
+              if app is None:
+                  app = {
+                      "name": meta["name"],
+                      "bundleIdentifier": meta["bundleIdentifier"],
+                      "developerName": meta["name"],
+                      "subtitle": "",
+                      "localizedDescription": "",
+                      "iconURL": "",
+                      "tintColor": "",
+                      "screenshotURLs": [],
+                      "appPermissions": {"entitlements": [], "privacy": {}},
+                      "versions": [],
+                  }
+                  apps.append(app)
+              entry = {
+                  "version": meta["version"],
+                  "date": date,
+                  "downloadURL": url,
+                  "size": meta["size"],
+              }
+              if meta["buildVersion"]:
+                  entry["buildVersion"] = meta["buildVersion"]
+              if meta["minOSVersion"]:
+                  entry["minOSVersion"] = meta["minOSVersion"]
+              versions = [v for v in app.get("versions", [])
+                          if not (v.get("version") == entry["version"] and v.get("size") == entry["size"])]
+              versions.append(entry)
+              versions.sort(key=lambda v: v.get("date") or "", reverse=True)
+              app["versions"] = versions
+              newest = versions[0]
+              app["version"] = newest["version"]
+              app["versionDate"] = newest["date"]
+              app["size"] = newest["size"]
+              app["downloadURL"] = newest["downloadURL"]
+              if meta["icon"]:
+                  name = f"{slug(meta['bundleIdentifier'])}.png"
+                  (ICONS / name).write_bytes(meta["icon"])
+                  app["iconURL"] = f"{RAW}/icons/{name}"
+              apps.sort(key=lambda a: (a.get("name") or "").lower())
+              return app
+
+          src = json.loads(SRC.read_text()) if SRC.exists() else {
+              "name": "Family Apps", "identifier": "com.family.apps", "subtitle": "",
+              "description": "", "iconURL": "", "headerURL": "",
+              "website": f"https://github.com/{REPO}", "tintColor": "0A84FF",
+              "featuredApps": [], "apps": [], "news": [],
+          }
+          for key in ("name", "identifier", "subtitle", "description", "iconURL",
+                      "headerURL", "website", "tintColor", "featuredApps", "news"):
+              src.setdefault(key, "" if key != "featuredApps" else [])
+
+          if MODE != "release":
+              src["apps"] = []
+              print("rebuilding from every release")
+
+          shutil.rmtree(TMP, ignore_errors=True)
+          for tag in tags():
+              print(f"release {tag}")
+              out = TMP / slug(tag)
+              gh("release", "download", tag, "--pattern", "*.ipa", "--dir", str(out), "--clobber")
+              ipas = sorted(out.rglob("*.ipa")) if out.exists() else []
+              if not ipas:
+                  print("  no .ipa asset")
+              date = published(tag)
+              for ipa in ipas:
+                  meta = parse(ipa)
+                  if not meta or not meta["bundleIdentifier"]:
+                      continue
+                  url = f"https://github.com/{REPO}/releases/download/{tag}/{ipa.name}"
+                  app = upsert(src, meta, date, url)
+                  print(f"  + {meta['name']} {meta['version']} ({meta['size']:,} bytes)")
+                  if meta["encrypted"]:
+                      print("    ! FairPlay encrypted - will install but crash on launch")
+              shutil.rmtree(out, ignore_errors=True)
+
+          SRC.write_text(json.dumps(src, indent=2) + "\n", encoding="utf-8")
+          print(f"repo.json: {len(src['apps'])} app(s)")
+          PY
+
+      - name: Commit
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -z "$(git status --porcelain)" ]; then
+            echo "nothing changed"
+            exit 0
+          fi
+          git add -A
+          git commit -m "update repo.json"
+          git push origin main
